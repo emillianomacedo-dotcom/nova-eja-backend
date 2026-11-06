@@ -106,7 +106,6 @@ export async function chamarIA({ promptSistema, mensagens }) {
     if (ENV.GEMINI_API_KEY) fila.push({ nome: "gemini", funcao: chamarGemini });
     if (ENV.OPENAI_API_KEY) fila.push({ nome: "openai", funcao: chamarOpenAI });
   } else {
-    // Se o provedor preferido nao for reconhecido, tenta todos
     if (ENV.GEMINI_API_KEY) fila.push({ nome: "gemini", funcao: chamarGemini });
     if (ENV.GROQ_API_KEY) fila.push({ nome: "groq", funcao: chamarGroq });
     if (ENV.OPENAI_API_KEY) fila.push({ nome: "openai", funcao: chamarOpenAI });
@@ -123,7 +122,6 @@ export async function chamarIA({ promptSistema, mensagens }) {
     } catch (erro) {
       console.warn("[ia] Falha no provedor " + provedor.nome + ":", erro.message);
       ultimoErro = erro;
-      // O loop continua para o proximo provedor da fila
     }
   }
 
