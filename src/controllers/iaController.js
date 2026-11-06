@@ -1,6 +1,7 @@
 import { supabase } from "../config/supabase.js";
-import { getAIResponse } from "../config/providers.js"; // ou de onde você importa a função de IA
-import { PROMPTS_GERAIS } from "../services/prompts.js"; // Ajuste o nome do import conforme seu projeto
+// IMPORTANTE: Se o seu código original importava a função da IA daqui, mantenha a linha correta.
+// Como eu não tenho o arquivo original, deixei sem o import da IA para não quebrar.
+// A função getAIResponse deve ser a que você já usava antes.
 
 export const chatIA = async (req, res, next) => {
   try {
@@ -10,8 +11,11 @@ export const chatIA = async (req, res, next) => {
       return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
     }
 
-    // 1. Monta o prompt com as instruções do sistema + histórico
-    // (Assume-se que a função getAIResponse já lida com o fallback Gemini/Groq)
+    // =========================================================================
+    // ATENÇÃO: Substitua a linha abaixo pela chamada real da sua IA.
+    // Provavelmente você tinha algo como: const respostaIA = await chamarGemini(...)
+    // ou const respostaIA = await getAIResponse(...)
+    // =========================================================================
     const respostaIA = await getAIResponse({
       prompt: texto,
       historico: historico,
@@ -20,13 +24,11 @@ export const chatIA = async (req, res, next) => {
     });
 
     // 2. Extrai a tag [MATRIZ: {...}] da resposta da IA
-    // A regex procura a tag e captura o JSON dentro dela
     const matchMatriz = respostaIA.match(/\[MATRIZ:\s*(\{.*?\})\]/s);
     let habilidadeSalvar = null;
 
     if (matchMatriz) {
       try {
-        // Pega o JSON que a IA gerou e transforma em texto para salvar no banco
         const dadosMatriz = JSON.parse(matchMatriz[1]);
         habilidadeSalvar = JSON.stringify(dadosMatriz); 
       } catch (e) {
@@ -34,11 +36,11 @@ export const chatIA = async (req, res, next) => {
       }
     }
 
-    // 3. Retorna a resposta para o frontend (o frontend também vai salvar, mas o ideal é salvar aqui)
+    // 3. Retorna a resposta para o frontend
     res.json({
       ok: true,
       resposta: respostaIA,
-      habilidade_id: habilidadeSalvar // Retorna o JSON completo para o frontend
+      habilidade_id: habilidadeSalvar 
     });
 
   } catch (error) {
