@@ -1,24 +1,20 @@
-import { supabase } from "../config/supabase.js";
-// IMPORTANTE: Mantenha aqui o import que você já usava para chamar a IA (Gemini/Groq).
-// Abaixo está o exemplo padrão. Se o seu era diferente, ajuste apenas esta linha.
-import { getAIResponse } from "../config/providers.js"; 
+import { chamarIA } from "../config/providers.js";
 
 // ==========================================
-// FUNÇÃO 1: ANALISAR (Usada pelo frontend para checar a IA antes de salvar)
+// FUNÇÃO 1: ANALISAR (Chamada direta pelo frontend se necessário)
 // ==========================================
 export const analisar = async (req, res, next) => {
   try {
     const { texto, segmento } = req.body;
     if (!texto) return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
 
-    // Chama a IA (ajuste o formato da chamada conforme o seu projeto)
-    const respostaIA = await getAIResponse({
-      prompt: texto,
-      historico: [],
-      segmento: segmento
+    // Chama a IA usando o formato do seu providers.js
+    const respostaObj = await chamarIA({
+      promptSistema: `Você é o Tutor IA da Nova EJA. Analise o texto e responda de forma breve.`,
+      mensagens: [{ role: "user", content: texto }]
     });
 
-    res.json({ ok: true, resposta: respostaIA });
+    res.json({ ok: true, resposta: respostaObj.texto });
   } catch (error) {
     next(error);
   }
@@ -35,15 +31,26 @@ export const chat = async (req, res, next) => {
       return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
     }
 
-    // 1. Chama a IA
-    const respostaIA = await getAIResponse({
-      prompt: texto,
-      historico: historico,
-      aba: aba,
-      segmento: segmento
+    // 1. Monta o histórico e o prompt do sistema
+    const mensagens = (historico || []).map(m => ({
+      role: m.role,
+      content: m.content
+    }));
+
+    // Se o histórico veio vazio, ele usa o texto atual
+    if (mensagens.length === 0) {
+      mensagens.push({ role: "user", content: texto });
+    }
+
+    // 2. Chama a IA através do seu providers.js
+    const respostaObj = await chamarIA({
+      promptSistema: `Você é o Tutor IA da Nova EJA (Reconhecimento de Saberes do SESI). O aluno está no Bloco ${aba}. O segmento é ${segmento}. Conduza a conversa com acolhimento e extraia habilidades usando a tag [MATRIZ: {"area": "...", "habilidade": "...", "justificativa": "..."}].`,
+      mensagens: mensagens
     });
 
-    // 2. Extrai a tag [MATRIZ: {...}] da resposta
+    const respostaIA = respostaObj.texto;
+
+    // 3. Extrai a tag [MATRIZ: {...}] da resposta da IA
     const matchMatriz = respostaIA.match(/\[MATRIZ:\s*(\{.*?\})\]/s);
     let habilidadeSalvar = null;
 
@@ -56,7 +63,7 @@ export const chat = async (req, res, next) => {
       }
     }
 
-    // 3. Retorna a resposta e a habilidade completa
+    // 4. Retorna a resposta e a habilidade completa
     res.json({
       ok: true,
       resposta: respostaIA,
