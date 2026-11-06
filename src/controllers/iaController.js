@@ -1,9 +1,33 @@
 import { supabase } from "../config/supabase.js";
-// IMPORTANTE: Se o seu código original importava a função da IA daqui, mantenha a linha correta.
-// Como eu não tenho o arquivo original, deixei sem o import da IA para não quebrar.
-// A função getAIResponse deve ser a que você já usava antes.
+// IMPORTANTE: Mantenha aqui o import que você já usava para chamar a IA (Gemini/Groq).
+// Abaixo está o exemplo padrão. Se o seu era diferente, ajuste apenas esta linha.
+import { getAIResponse } from "../config/providers.js"; 
 
-export const chatIA = async (req, res, next) => {
+// ==========================================
+// FUNÇÃO 1: ANALISAR (Usada pelo frontend para checar a IA antes de salvar)
+// ==========================================
+export const analisar = async (req, res, next) => {
+  try {
+    const { texto, segmento } = req.body;
+    if (!texto) return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
+
+    // Chama a IA (ajuste o formato da chamada conforme o seu projeto)
+    const respostaIA = await getAIResponse({
+      prompt: texto,
+      historico: [],
+      segmento: segmento
+    });
+
+    res.json({ ok: true, resposta: respostaIA });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// FUNÇÃO 2: CHAT (Usada na conversa normal do aluno)
+// ==========================================
+export const chat = async (req, res, next) => {
   try {
     const { texto, historico, aba, segmento } = req.body;
 
@@ -11,11 +35,7 @@ export const chatIA = async (req, res, next) => {
       return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
     }
 
-    // =========================================================================
-    // ATENÇÃO: Substitua a linha abaixo pela chamada real da sua IA.
-    // Provavelmente você tinha algo como: const respostaIA = await chamarGemini(...)
-    // ou const respostaIA = await getAIResponse(...)
-    // =========================================================================
+    // 1. Chama a IA
     const respostaIA = await getAIResponse({
       prompt: texto,
       historico: historico,
@@ -23,7 +43,7 @@ export const chatIA = async (req, res, next) => {
       segmento: segmento
     });
 
-    // 2. Extrai a tag [MATRIZ: {...}] da resposta da IA
+    // 2. Extrai a tag [MATRIZ: {...}] da resposta
     const matchMatriz = respostaIA.match(/\[MATRIZ:\s*(\{.*?\})\]/s);
     let habilidadeSalvar = null;
 
@@ -36,7 +56,7 @@ export const chatIA = async (req, res, next) => {
       }
     }
 
-    // 3. Retorna a resposta para o frontend
+    // 3. Retorna a resposta e a habilidade completa
     res.json({
       ok: true,
       resposta: respostaIA,
