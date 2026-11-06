@@ -1,14 +1,13 @@
 import { chamarIA } from "../config/providers.js";
 
 // ==========================================
-// FUNÇÃO 1: ANALISAR (Chamada direta pelo frontend se necessário)
+// FUNÇÃO 1: ANALISAR
 // ==========================================
 export const analisar = async (req, res, next) => {
   try {
     const { texto, segmento } = req.body;
     if (!texto) return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
 
-    // Chama a IA usando o formato do seu providers.js
     const respostaObj = await chamarIA({
       promptSistema: `Você é o Tutor IA da Nova EJA. Analise o texto e responda de forma breve.`,
       mensagens: [{ role: "user", content: texto }]
@@ -21,7 +20,7 @@ export const analisar = async (req, res, next) => {
 };
 
 // ==========================================
-// FUNÇÃO 2: CHAT (Usada na conversa normal do aluno)
+// FUNÇÃO 2: CHAT (Conversa com o aluno)
 // ==========================================
 export const chat = async (req, res, next) => {
   try {
@@ -31,26 +30,36 @@ export const chat = async (req, res, next) => {
       return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
     }
 
-    // 1. Monta o histórico e o prompt do sistema
     const mensagens = (historico || []).map(m => ({
       role: m.role,
       content: m.content
     }));
 
-    // Se o histórico veio vazio, ele usa o texto atual
     if (mensagens.length === 0) {
       mensagens.push({ role: "user", content: texto });
     }
 
-    // 2. Chama a IA através do seu providers.js
+    // O PROMPT BLINDADO: Regras rígidas para a IA não avançar de bloco sozinha
+    const promptSistema = `
+      Você é o Tutor IA da Nova EJA (Reconhecimento de Saberes do SESI). 
+      O aluno está no Bloco ${aba} (de um total de 8 blocos). O segmento dele é: ${segmento}.
+      
+      REGRAS CRÍTICAS DE CONDUÇÃO (SIGA À RISCA):
+      1. ACOLHIMENTO: Seja sempre muito educado, empático e acolhedor. Use uma linguagem simples (adequada para o público da EJA).
+      2. APROFUNDAMENTO: NUNCA aceite respostas curtas. Se o aluno responder apenas uma frase, faça novas perguntas abertas para ele contar mais detalhes ("Como foi isso?", "Pode me contar mais sobre essa parte?").
+      3. TEMPO NO BLOCO: Você deve fazer, no mínimo, de 4 a 6 interações com o aluno neste bloco antes de pensar em encerrá-lo.
+      4. PROIBIÇÃO: É ESTRITAMENTE PROIBIDO emitir a tag [FIM_BLOCO] nas primeiras respostas. A tag [FIM_BLOCO] SÓ pode ser emitida se o aluno disser textualmente que "não tem mais nada a acrescentar", "é só isso" ou "acabou".
+      5. EXTRAÇÃO: Sempre que o aluno relatar algo que se encaixe nas competências da Matriz SESI, emita no final do seu texto a tag [MATRIZ: {"area": "...", "habilidade": "...", "justificativa": "detalhe exato do que o aluno falou que comprova a habilidade"}].
+    `;
+
     const respostaObj = await chamarIA({
-      promptSistema: `Você é o Tutor IA da Nova EJA (Reconhecimento de Saberes do SESI). O aluno está no Bloco ${aba}. O segmento é ${segmento}. Conduza a conversa com acolhimento e extraia habilidades usando a tag [MATRIZ: {"area": "...", "habilidade": "...", "justificativa": "..."}].`,
+      promptSistema: promptSistema,
       mensagens: mensagens
     });
 
     const respostaIA = respostaObj.texto;
 
-    // 3. Extrai a tag [MATRIZ: {...}] da resposta da IA
+    // Extrai a tag [MATRIZ: {...}] da resposta da IA
     const matchMatriz = respostaIA.match(/\[MATRIZ:\s*(\{.*?\})\]/s);
     let habilidadeSalvar = null;
 
@@ -63,7 +72,6 @@ export const chat = async (req, res, next) => {
       }
     }
 
-    // 4. Retorna a resposta e a habilidade completa
     res.json({
       ok: true,
       resposta: respostaIA,
