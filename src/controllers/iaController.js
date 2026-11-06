@@ -1,64 +1,48 @@
-import { analisarRelato, conversar } from "../services/gemini.js";
+import { supabase } from "../config/supabase.js";
+import { getAIResponse } from "../config/providers.js"; // ou de onde você importa a função de IA
+import { PROMPTS_GERAIS } from "../services/prompts.js"; // Ajuste o nome do import conforme seu projeto
 
-export async function analisar(req, res, next) {
+export const chatIA = async (req, res, next) => {
   try {
-    const { aba, texto, segmento, situacaoId } = req.body;
+    const { texto, historico, aba, segmento } = req.body;
 
-    if (!aba || texto === undefined) {
-      return res.status(400).json({ ok: false, mensagem: "Campos obrigatorios: aba, texto" });
+    if (!texto) {
+      return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
     }
 
-    const r = await analisarRelato({ aba, textoAluno: texto, segmento });
-
-    res.json({
-      ok: true,
-      aba,
-      situacaoId: situacaoId || null,
-      resposta: r.texto,
-      provedor: r.provedor,
-      modelo: r.modelo
+    // 1. Monta o prompt com as instruções do sistema + histórico
+    // (Assume-se que a função getAIResponse já lida com o fallback Gemini/Groq)
+    const respostaIA = await getAIResponse({
+      prompt: texto,
+      historico: historico,
+      aba: aba,
+      segmento: segmento
     });
-  } catch (e) { next(e); }
-}
 
-export async function chat(req, res, next) {
-  try {
-    const { aba, texto, segmento, historico } = req.body;
+    // 2. Extrai a tag [MATRIZ: {...}] da resposta da IA
+    // A regex procura a tag e captura o JSON dentro dela
+    const matchMatriz = respostaIA.match(/\[MATRIZ:\s*(\{.*?\})\]/s);
+    let habilidadeSalvar = null;
 
-    if (!aba) {
-      return res.status(400).json({ ok: false, mensagem: "Campo obrigatorio: aba" });
-    }
-    if (!Array.isArray(historico)) {
-      return res.status(400).json({ ok: false, mensagem: "historico deve ser uma lista" });
-    }
-
-    const r = await conversar({ aba, textoAluno: texto || "", segmento, historico });
-
-    // Tenta extrair a area identificada pela IA
-    let area_identificada = null;
-    const match = r.texto.match(/\[MATRIZ: (\{.*?\})\]/);
-    if (match) {
+    if (matchMatriz) {
       try {
-        const matriz = JSON.parse(match[1]);
-        area_identificada = matriz.area || null;
+        // Pega o JSON que a IA gerou e transforma em texto para salvar no banco
+        const dadosMatriz = JSON.parse(matchMatriz[1]);
+        habilidadeSalvar = JSON.stringify(dadosMatriz); 
       } catch (e) {
-        console.warn("[ia] Erro ao ler JSON da matriz:", e);
+        console.error("Erro ao ler a matriz JSON da IA:", e);
       }
     }
 
-    // Remove a tag tecnica da resposta final que vai para o aluno
-    let textoLimpo = r.texto;
-    if (match) {
-      textoLimpo = textoLimpo.replace(match[0], "").trim();
-    }
-
+    // 3. Retorna a resposta para o frontend (o frontend também vai salvar, mas o ideal é salvar aqui)
     res.json({
       ok: true,
-      aba,
-      resposta: textoLimpo,
-      habilidade_id: area_identificada, // Salvamos a Area no banco
-      provedor: r.provedor,
-      modelo: r.modelo
+      resposta: respostaIA,
+      habilidade_id: habilidadeSalvar // Retorna o JSON completo para o frontend
     });
-  } catch (e) { next(e); }
-}
+
+  } catch (error) {
+    console.error("Erro no controller da IA:", error);
+    next(error);
+  }
+};
