@@ -3,12 +3,38 @@ import { supabase } from "../config/supabase.js";
 
 const router = Router();
 
-// 1. Listar todos os alunos
+// 1. Listar todos os alunos (agora com a turma do último formulário)
 router.get("/alunos", async (req, res, next) => {
   try {
-    const { data, error } = await supabase.from("alunos").select("*").order("nome_completo");
+    // Busca os alunos e os formulários deles
+    const { data, error } = await supabase
+      .from("alunos")
+      .select(`
+        *,
+        formularios (
+          turma
+        )
+      `)
+      .order("nome_completo");
+
     if (error) throw error;
-    res.json({ ok: true, alunos: data });
+
+    // Formata os dados para o Frontend não ter trabalho
+    const alunosFormatados = data.map(aluno => {
+      // Pega a turma do formulário mais recente (se existir)
+      const turmas = aluno.formularios.map(f => f.turma);
+      const turmaAtual = turmas.length > 0 ? turmas[turmas.length - 1] : "Sem turma";
+
+      return {
+        id: aluno.id,
+        nome_completo: aluno.nome_completo,
+        cpf: aluno.cpf,
+        acesso_bloqueado: aluno.acesso_bloqueado,
+        turma: turmaAtual
+      };
+    });
+
+    res.json({ ok: true, alunos: alunosFormatados });
   } catch (e) { next(e); }
 });
 
