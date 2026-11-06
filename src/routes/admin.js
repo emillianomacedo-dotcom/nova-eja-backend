@@ -41,7 +41,7 @@ router.get("/alunos/:id/relatorio", async (req, res, next) => {
       .maybeSingle();
       
     if (errF) throw errF;
-    if (!form) return res.json({ ok: true, mensagens: [] });
+    if (!form) return res.json({ ok: true, mensagens: [], formulario: null });
 
     const { data: mensagens, error: errM } = await supabase
       .from("mensagens_chat")
@@ -51,7 +51,31 @@ router.get("/alunos/:id/relatorio", async (req, res, next) => {
       
     if (errM) throw errM;
 
-    res.json({ ok: true, mensagens: mensagens || [] });
+    res.json({ ok: true, mensagens: mensagens || [], formulario: form });
+  } catch (e) { next(e); }
+});
+
+// 4. Deletar aluno (e seus registros vinculados em cascata)
+router.delete("/alunos/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Deleta as mensagens do aluno (se existirem formulários)
+    const { data: formularios } = await supabase.from("formularios").select("id").eq("aluno_id", id);
+    if (formularios && formularios.length > 0) {
+      const idsFormularios = formularios.map(f => f.id);
+      await supabase.from("mensagens_chat").delete().in("formulario_id", idsFormularios);
+      await supabase.from("habilidades_reconhecidas").delete().in("formulario_id", idsFormularios);
+    }
+
+    // 2. Deleta os formulários do aluno
+    await supabase.from("formularios").delete().eq("aluno_id", id);
+
+    // 3. Deleta o aluno
+    const { error } = await supabase.from("alunos").delete().eq("id", id);
+    if (error) throw error;
+
+    res.json({ ok: true, mensagem: "Aluno e registros deletados com sucesso." });
   } catch (e) { next(e); }
 });
 
