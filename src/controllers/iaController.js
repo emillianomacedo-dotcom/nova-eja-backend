@@ -1,64 +1,76 @@
-import { analisarRelato, conversar } from "../services/gemini.js";
+import { chamarIA } from "../config/providers.js";
+import { getPromptSistema } from "../services/prompts.js";
 
-export async function analisar(req, res, next) {
+// ==========================================
+// FUNÇÃO 1: ANALISAR
+// ==========================================
+export const analisar = async (req, res, next) => {
   try {
-    const { aba, texto, segmento, situacaoId } = req.body;
+    const { texto, segmento } = req.body;
+    if (!texto) return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
 
-    if (!aba || texto === undefined) {
-      return res.status(400).json({ ok: false, mensagem: "Campos obrigatorios: aba, texto" });
-    }
-
-    const r = await analisarRelato({ aba, textoAluno: texto, segmento });
-
-    res.json({
-      ok: true,
-      aba,
-      situacaoId: situacaoId || null,
-      resposta: r.texto,
-      provedor: r.provedor,
-      modelo: r.modelo
+    const respostaObj = await chamarIA({
+      promptSistema: `Você é o Tutor IA da Nova EJA. Analise o texto e responda de forma breve.`,
+      mensagens: [{ role: "user", content: texto }]
     });
-  } catch (e) { next(e); }
-}
 
-export async function chat(req, res, next) {
+    res.json({ ok: true, resposta: respostaObj.texto });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// FUNÇÃO 2: CHAT
+// ==========================================
+export const chat = async (req, res, next) => {
   try {
-    const { aba, texto, segmento, historico } = req.body;
+    const { texto, historico, aba, segmento } = req.body;
 
-    if (!aba) {
-      return res.status(400).json({ ok: false, mensagem: "Campo obrigatorio: aba" });
-    }
-    if (!Array.isArray(historico)) {
-      return res.status(400).json({ ok: false, mensagem: "historico deve ser uma lista" });
+    if (!texto) {
+      return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
     }
 
-    const r = await conversar({ aba, textoAluno: texto || "", segmento, historico });
+    const mensagens = (historico || []).map(m => ({
+      role: m.role,
+      content: m.content
+    }));
 
-    // Tenta extrair a area identificada pela IA
-    let area_identificada = null;
-    const match = r.texto.match(/\[MATRIZ: (\{.*?\})\]/);
-    if (match) {
+    if (mensagens.length === 0) {
+      mensagens.push({ role: "user", content: texto });
+    }
+
+    // Chama a função que monta o prompt com a Matriz SESI correta
+    const promptSistema = getPromptSistema(segmento, aba);
+
+    const respostaObj = await chamarIA({
+      promptSistema: promptSistema,
+      mensagens: mensagens
+    });
+
+    const respostaIA = respostaObj.texto;
+
+    // Extrai a tag [MATRIZ: {...}] da resposta da IA
+    const matchMatriz = respostaIA.match(/\[MATRIZ:\s*(\{.*?\})\]/s);
+    let habilidadeSalvar = null;
+
+    if (matchMatriz) {
       try {
-        const matriz = JSON.parse(match[1]);
-        area_identificada = matriz.area || null;
+        const dadosMatriz = JSON.parse(matchMatriz[1]);
+        habilidadeSalvar = JSON.stringify(dadosMatriz); 
       } catch (e) {
-        console.warn("[ia] Erro ao ler JSON da matriz:", e);
+        console.error("Erro ao ler a matriz JSON da IA:", e);
       }
     }
 
-    // Remove a tag tecnica da resposta final que vai para o aluno
-    let textoLimpo = r.texto;
-    if (match) {
-      textoLimpo = textoLimpo.replace(match[0], "").trim();
-    }
-
     res.json({
       ok: true,
-      aba,
-      resposta: textoLimpo,
-      habilidade_id: area_identificada, // Salvamos a Area no banco
-      provedor: r.provedor,
-      modelo: r.modelo
+      resposta: respostaIA,
+      habilidade_id: habilidadeSalvar 
     });
-  } catch (e) { next(e); }
-}
+
+  } catch (error) {
+    console.error("Erro no controller da IA:", error);
+    next(error);
+  }
+};
