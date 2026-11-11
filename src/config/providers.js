@@ -1,72 +1,89 @@
 /* ============================================================
-   Nova EJA - Multi-provedor de IA com Failover
+   Nova EJA - Multi-provedor de IA (Gemini Novo SDK, DeepSeek, Groq)
    ============================================================ */
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai"; // NOVO SDK
 import { ENV } from "./env.js";
 
-// ---------- Gemini ----------
-let geminiClient = null;
-function getGemini() {
-  if (!geminiClient) {
-    if (!ENV.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY nao configurada.");
-    geminiClient = new GoogleGenerativeAI(ENV.GEMINI_API_KEY);
-  }
-  return geminiClient;
+// ---------- GEMINI (com rotação de chaves) ----------
+let geminiKeys = [];
+let geminiIndex = 0;
+
+if (ENV.GEMINI_API_KEYS) {
+  geminiKeys = ENV.GEMINI_API_KEYS.split(",").map(k => k.trim()).filter(Boolean);
+} else if (ENV.GEMINI_API_KEY) {
+  geminiKeys = [ENV.GEMINI_API_KEY.trim()];
 }
 
 async function chamarGemini({ promptSistema, mensagens }) {
-  const genAI = getGemini();
-  const model = genAI.getGenerativeModel({
-    model: ENV.GEMINI_MODEL,
-    systemInstruction: promptSistema
-  });
+  if (geminiKeys.length === 0) throw new Error("Nenhuma chave Gemini configurada.");
 
-  const contents = mensagens.map(m => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }]
-  }));
+  for (let i = 0; i < geminiKeys.length; i++) {
+    const chaveAtual = geminiKeys[geminiIndex % geminiKeys.length];
+    try {
+      // Inicializa o cliente com a chave atual
+      const ai = new GoogleGenAI({ apiKey: chaveAtual });
+      
+      // Converte o histórico para o formato do novo SDK
+      const contents = mensagens.map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      }));
 
-  const result = await model.generateContent({ contents });
-  const texto = result.response.text();
-  return { texto, provedor: "gemini", modelo: ENV.GEMINI_MODEL };
+      // Chamada no novo formato
+      const response = await ai.models.generateContent({
+        model: ENV.GEMINI_MODEL || "gemini-3.5-flash-lite", // Modelo atualizado
+        config: { systemInstruction: promptSistema },
+        contents: contents
+      });
+
+      const texto = response.text;
+      geminiIndex++;
+      return { texto, provedor: "gemini" };
+    } catch (erro) {
+      console.warn(`[ia] Falha na chave Gemini ${geminiIndex % geminiKeys.length}:`, erro.message);
+      geminiIndex++;
+    }
+  }
+  throw new Error("Todas as chaves do Gemini falharam.");
 }
 
-// ---------- OpenAI ----------
-async function chamarOpenAI({ promptSistema, mensagens }) {
-  if (!ENV.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY nao configurada.");
+// ---------- DEEPSEEK (Fallback 1) ----------
+async function chamarDeepSeek({ promptSistema, mensagens }) {
+  if (!ENV.DEEPSEEK_API_KEY) throw new Error("DEEPSEEK_API_KEY nao configurada.");
 
   const corpo = {
-    model: ENV.OPENAI_MODEL,
+    model: ENV.DEEPSEEK_MODEL || "deepseek-chat", // Modelo padrão da API deles
     messages: [{ role: "system", content: promptSistema }, ...mensagens],
-    temperature: 0.4
+    temperature: 0.4,
+    stream: false
   };
 
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+  const resp = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + ENV.OPENAI_API_KEY.trim()
+      Authorization: "Bearer " + ENV.DEEPSEEK_API_KEY.trim()
     },
     body: JSON.stringify(corpo)
   });
 
   if (!resp.ok) {
     const detalhe = await resp.text();
-    throw new Error("OpenAI " + resp.status + ": " + detalhe);
+    throw new Error("DeepSeek " + resp.status + ": " + detalhe);
   }
 
   const dados = await resp.json();
   const texto = dados.choices?.[0]?.message?.content || "";
-  return { texto, provedor: "openai", modelo: ENV.OPENAI_MODEL };
+  return { texto, provedor: "deepseek" };
 }
 
-// ---------- Groq ----------
+// ---------- GROQ (Fallback 2) ----------
 async function chamarGroq({ promptSistema, mensagens }) {
   if (!ENV.GROQ_API_KEY) throw new Error("GROQ_API_KEY nao configurada.");
 
   const corpo = {
-    model: ENV.GROQ_MODEL,
+    model: ENV.GROQ_MODEL || "llama-3.3-70b-versatile",
     messages: [{ role: "system", content: promptSistema }, ...mensagens],
     temperature: 0.4
   };
@@ -87,45 +104,38 @@ async function chamarGroq({ promptSistema, mensagens }) {
 
   const dados = await resp.json();
   const texto = dados.choices?.[0]?.message?.content || "";
-  return { texto, provedor: "groq", modelo: ENV.GROQ_MODEL };
+  return { texto, provedor: "groq" };
 }
 
-// ---------- API publica com Failover ----------
+// ---------- API pública com Failover ----------
 export async function chamarIA({ promptSistema, mensagens }) {
-  const provedorPreferido = (ENV.IA_PROVEDOR || "gemini").toLowerCase();
-  
-  const fila = [];
+  // 1. Tenta o Gemini
+  try {
+    console.log("[ia] Tentando provedor: gemini...");
+    return await chamarGemini({ promptSistema, mensagens });
+  } catch (erroGemini) {
+    console.warn("[ia] Gemini falhou:", erroGemini.message);
 
-  // Monta a fila de prioridade
-  if (provedorPreferido === "gemini") {
-    fila.push({ nome: "gemini", funcao: chamarGemini });
-    if (ENV.GROQ_API_KEY) fila.push({ nome: "groq", funcao: chamarGroq });
-    if (ENV.OPENAI_API_KEY) fila.push({ nome: "openai", funcao: chamarOpenAI });
-  } else if (provedorPreferido === "groq") {
-    fila.push({ nome: "groq", funcao: chamarGroq });
-    if (ENV.GEMINI_API_KEY) fila.push({ nome: "gemini", funcao: chamarGemini });
-    if (ENV.OPENAI_API_KEY) fila.push({ nome: "openai", funcao: chamarOpenAI });
-  } else {
-    // Se o provedor preferido nao for reconhecido, tenta todos
-    if (ENV.GEMINI_API_KEY) fila.push({ nome: "gemini", funcao: chamarGemini });
-    if (ENV.GROQ_API_KEY) fila.push({ nome: "groq", funcao: chamarGroq });
-    if (ENV.OPENAI_API_KEY) fila.push({ nome: "openai", funcao: chamarOpenAI });
-  }
-
-  let ultimoErro = null;
-
-  for (const provedor of fila) {
-    try {
-      console.log("[ia] Tentando provedor: " + provedor.nome + "...");
-      const resultado = await provedor.funcao({ promptSistema, mensagens });
-      console.log("[ia] Sucesso com: " + provedor.nome);
-      return resultado;
-    } catch (erro) {
-      console.warn("[ia] Falha no provedor " + provedor.nome + ":", erro.message);
-      ultimoErro = erro;
-      // O loop continua para o proximo provedor da fila
+    // 2. Tenta o DeepSeek
+    if (ENV.DEEPSEEK_API_KEY) {
+      try {
+        console.log("[ia] Tentando provedor: deepseek...");
+        return await chamarDeepSeek({ promptSistema, mensagens });
+      } catch (erroDeepSeek) {
+        console.warn("[ia] DeepSeek falhou:", erroDeepSeek.message);
+      }
     }
-  }
 
-  throw new Error("Todos os provedores de IA falharam. Ultimo erro: " + (ultimoErro ? ultimoErro.message : "Desconhecido"));
+    // 3. Tenta o Groq
+    if (ENV.GROQ_API_KEY) {
+      try {
+        console.log("[ia] Tentando provedor: groq...");
+        return await chamarGroq({ promptSistema, mensagens });
+      } catch (erroGroq) {
+        console.warn("[ia] Groq falhou:", erroGroq.message);
+      }
+    }
+
+    throw new Error("Todos os provedores de IA falharam.");
+  }
 }

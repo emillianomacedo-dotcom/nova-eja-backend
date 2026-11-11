@@ -1,9 +1,6 @@
 import { chamarIA } from "../config/providers.js";
 import { getPromptSistema } from "../services/prompts.js";
 
-// ==========================================
-// FUNÇÃO 1: ANALISAR
-// ==========================================
 export const analisar = async (req, res, next) => {
   try {
     const { texto, segmento } = req.body;
@@ -20,9 +17,6 @@ export const analisar = async (req, res, next) => {
   }
 };
 
-// ==========================================
-// FUNÇÃO 2: CHAT
-// ==========================================
 export const chat = async (req, res, next) => {
   try {
     const { texto, historico, aba, segmento } = req.body;
@@ -31,16 +25,21 @@ export const chat = async (req, res, next) => {
       return res.status(400).json({ ok: false, mensagem: "Texto e obrigatorio" });
     }
 
-    const mensagens = (historico || []).map(m => ({
-      role: m.role,
-      content: m.content
-    }));
+    // Limpa o histórico para remover comandos e tags
+    const mensagens = (historico || [])
+      .filter(m => !m.content.match(/^(próximo bloco|prosseguir|ok|continuar|pode ir|avançar)$/i))
+      .map(m => ({
+        role: m.role,
+        content: m.content
+          .replace(/\[MATRIZ:.*?\]/g, "")
+          .replace(/\[FIM_BLOCO\]/g, "")
+          .trim()
+      }));
 
     if (mensagens.length === 0) {
       mensagens.push({ role: "user", content: texto });
     }
 
-    // Chama a função que monta o prompt com a Matriz SESI correta
     const promptSistema = getPromptSistema(segmento, aba);
 
     const respostaObj = await chamarIA({
@@ -50,7 +49,6 @@ export const chat = async (req, res, next) => {
 
     const respostaIA = respostaObj.texto;
 
-    // Extrai a tag [MATRIZ: {...}] da resposta da IA
     const matchMatriz = respostaIA.match(/\[MATRIZ:\s*(\{.*?\})\]/s);
     let habilidadeSalvar = null;
 

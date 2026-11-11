@@ -1,47 +1,47 @@
 /* ============================================================
-   Nova EJA - Leitura e validacao de variaveis de ambiente
+   Nova EJA - Configuração de Variáveis de Ambiente
    ============================================================ */
 
 import dotenv from "dotenv";
+
+// Tenta carregar o .env (se existir). Se não existir, não quebra.
 dotenv.config();
 
+// Valida se uma variável existe, senão lança erro (útil para o Render)
 function obrigatoria(nome) {
   const valor = process.env[nome];
-  if (!valor) throw new Error("Variavel de ambiente obrigatoria ausente: " + nome);
+  if (!valor) throw new Error(`Variavel de ambiente obrigatoria ausente: ${nome}`);
   return valor;
 }
 
-function opcional(nome, padrao) {
-  return process.env[nome] || padrao;
-}
-
 export const ENV = {
-  NODE_ENV:           opcional("NODE_ENV", "development"),
-  PORT:               Number(opcional("PORT", 3000)),
-  CORS_ORIGINS:       opcional("CORS_ORIGINS", "http://localhost:3000"),
+  // ---------- SERVIDOR ----------
+  PORT: process.env.PORT || 3000,
+  NODE_ENV: process.env.NODE_ENV || "development",
+  CORS_ORIGINS: process.env.CORS_ORIGINS || "*",
 
-  SUPABASE_URL:               obrigatoria("SUPABASE_URL"),
-  SUPABASE_SERVICE_ROLE_KEY:  obrigatoria("SUPABASE_SERVICE_ROLE_KEY"),
+  // ---------- SUPABASE ----------
+  SUPABASE_URL: obrigatoria("SUPABASE_URL"),
+  SUPABASE_SERVICE_ROLE_KEY: obrigatoria("SUPABASE_SERVICE_ROLE_KEY"),
+  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || "",
 
-  IA_PROVEDOR:        opcional("IA_PROVEDOR", "gemini"),
-  GEMINI_API_KEY:     opcional("GEMINI_API_KEY", ""),
-  GEMINI_MODEL:       opcional("GEMINI_MODEL", "gemini-2.5-flash"),
-  OPENAI_API_KEY:     opcional("OPENAI_API_KEY", ""),
-  OPENAI_MODEL:       opcional("OPENAI_MODEL", "gpt-4o-mini"),
+  // ---------- IA: GEMINI ----------
+  GEMINI_API_KEYS: process.env.GEMINI_API_KEYS || "",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+  GEMINI_MODEL: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
+
+  // ---------- IA: DEEPSEEK ----------
+  DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || "",
+  DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL || "deepseek-flash",
   
-  // Groq
-  GROQ_API_KEY:       opcional("GROQ_API_KEY", ""),
-  GROQ_MODEL:         opcional("GROQ_MODEL", "openai/gpt-oss-120b")
-};
+  // ---------- IA: GROQ ----------
+  GROQ_API_KEY: process.env.GROQ_API_KEY || "",
+  GROQ_MODEL: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
 
-export function validarEnv() {
-  if (ENV.IA_PROVEDOR === "gemini" && !ENV.GEMINI_API_KEY) {
-    console.warn("[env] IA_PROVEDOR=gemini mas GEMINI_API_KEY esta vazia.");
-  }
-  if (ENV.IA_PROVEDOR === "openai" && !ENV.OPENAI_API_KEY) {
-    console.warn("[env] IA_PROVEDOR=openai mas OPENAI_API_KEY esta vazia.");
-  }
-  if (ENV.IA_PROVEDOR === "groq" && !ENV.GROQ_API_KEY) {
-    console.warn("[env] IA_PROVEDOR=groq mas GROQ_API_KEY esta vazia.");
-  }
-}
+  // ---------- IA: OPENAI (Opcional) ----------
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4o-mini",
+
+  // ---------- OUTROS ----------
+  JWT_SECRET: process.env.JWT_SECRET || "nova-eja-secret",
+};

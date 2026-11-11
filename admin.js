@@ -29,7 +29,7 @@ router.put("/alunos/:id/bloquear", async (req, res, next) => {
 });
 
 // 3. Buscar relatório (mensagens) do aluno
-router.get("/alunos/:id/relatorio", async (req, res, next) => {
+router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
   try {
     const { id } = req.params;
     // Busca o formulário do aluno
