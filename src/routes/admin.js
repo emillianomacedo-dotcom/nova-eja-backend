@@ -2,7 +2,7 @@ import { Router } from "express";
 import { supabase } from "../config/supabase.js";
 import { MATRIZ_FUNDAMENTAL, MATRIZ_MEDIO } from "../services/prompts.js";
 import PDFDocument from "pdfkit";
-import fs from "fs"; // Para ler a imagem da logo
+import fs from "fs";
 import path from "path";
 
 const router = Router();
@@ -86,7 +86,7 @@ router.get("/alunos/:id/relatorio", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 4. Gerar PDF (Capa sem azul, logomarca e conteúdo centralizado)
+// 4. Gerar PDF (Capa corrigida + Checkboxes)
 router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -128,21 +128,19 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
     
     doc.pipe(res);
 
-    // --- CAPA (SEM AZUL, LOGO NO TOPO, INFORMAÇÕES CENTRALIZADAS) ---
-    
-    // Caminho da logo (ajuste se necessário)
+    // --- CAPA (LOGO NO TOPO, TEXTO ABAIXO) ---
     const logoPath = path.join(process.cwd(), "icons", "logo-sesi.png");
-    
-    // Desenha a logo no topo (centralizada)
+    const logoWidth = 120;
+    const logoX = (doc.page.width - logoWidth) / 2;
+
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, doc.page.width / 2 - 50, 50, { width: 100 });
-      doc.moveDown(5); // Espaço após a logo
+      doc.image(logoPath, logoX, 50, { width: logoWidth });
+      doc.y = 50 + 60 + 20; // move o cursor para baixo da logo
     } else {
       doc.fontSize(10).text("[Logo SESI não encontrada]", { align: 'center' });
       doc.moveDown(2);
     }
 
-    // Informações centrais da capa
     doc.fontSize(16).fillColor('black').text('SESI - SERVIÇO SOCIAL DA INDÚSTRIA', { align: 'center' });
     doc.fontSize(12).text('Departamento Regional da Paraíba', { align: 'center' });
     doc.fontSize(12).text('Gerência de Educação', { align: 'center' });
@@ -158,13 +156,11 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
     doc.fontSize(12).text(`Etapa: ${form.segmento}`, { align: 'center' });
     doc.fontSize(12).text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, { align: 'center' });
     
-    doc.moveDown(4); // Espaço antes do rodapé
+    doc.moveDown(4);
     
-    // Rodapé da capa
     doc.fontSize(10).fillColor('#555').text('SESI · Nova EJA · Reconhecimento de Saberes · v2.0', { align: 'center' });
     doc.fontSize(8).text('Desenvolvido por Emilliano Gabriel Macêdo - Pedagogo / Supervisor Pedagógico', { align: 'center' });
 
-    // Quebra de página para o conteúdo
     doc.addPage();
 
     // --- CONTEÚDO (Fonte 10) ---
@@ -176,7 +172,7 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
     doc.text(`Status: Concluído`);
     doc.moveDown();
 
-    // Habilidades Reconhecidas pela IA (Fonte 10)
+    // Habilidades Reconhecidas pela IA
     const habilidadesMap = new Map();
     mensagens.forEach(msg => {
       if (msg.habilidade_id) {
@@ -251,7 +247,7 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
         doc.fontSize(10).text(titulosBlocos[i], { underline: true });
         doc.moveDown(0.5);
 
-        // Relatos (Fonte 10)
+        // Relatos
         let ultimaPerguntaIA = "";
         blocos[i].forEach(msg => {
           const textoLimpo = msg.texto.replace(/\[MATRIZ:.*?\]|\[FIM_BLOCO\]/g, "").trim();
@@ -297,7 +293,28 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
               doc.moveDown(0.5);
             });
           } else {
-            doc.fontSize(10).text('[ ] Nenhuma competência/habilidade encontrada na matriz para esta área.');
+            // Fallback: lista diretamente as habilidades da matriz
+            const matrizNormalizada = matrizCompleta.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const regexArea = new RegExp(`(?:\\[${areaNome}\\]|${areaNome}\\s*\\n)([\\s\\S]*?)(?=\\[|$)`, 'i');
+            const match = matrizNormalizada.match(regexArea);
+            
+            if (match) {
+              const linhas = match[1].split('\n').map(l => l.trim()).filter(l => l.startsWith('H'));
+              if (linhas.length > 0) {
+                linhas.forEach(hab => {
+                  const checkboxX = 50;
+                  const checkboxY = doc.y;
+                  
+                  doc.rect(checkboxX, checkboxY, 10, 10).stroke();
+                  doc.fontSize(10).text(`  ${hab}`, checkboxX + 15, checkboxY - 2, { width: 500 });
+                  doc.moveDown(0.8);
+                });
+              } else {
+                doc.fontSize(10).text('[ ] Nenhuma habilidade encontrada na matriz para esta área.');
+              }
+            } else {
+              doc.fontSize(10).text('[ ] Nenhuma competência/habilidade encontrada na matriz para esta área.');
+            }
           }
           doc.moveDown();
         }
