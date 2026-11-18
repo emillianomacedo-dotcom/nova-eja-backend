@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { supabase } from "../config/supabase.js";
 import { MATRIZ_FUNDAMENTAL, MATRIZ_MEDIO } from "../services/prompts.js";
+import { executarValidacaoInterdisciplinar } from "../controllers/iaController.js";
 import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
@@ -86,7 +87,7 @@ router.get("/alunos/:id/relatorio", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 4. Gerar PDF (Capa corrigida + Checkboxes)
+// 4. Gerar PDF (Capa + Validação Interdisciplinar Final + Relatos por Formulário + Checkboxes)
 router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -102,7 +103,7 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
     if (errF) throw errF;
     if (!form) return res.status(404).json({ ok: false, mensagem: "Formulário não encontrado" });
 
-    const { data: mensagens, error: errM } = await supabase
+    let { data: mensagens, error: errM } = await supabase
       .from("mensagens_chat")
       .select("*")
       .eq("formulario_id", form.id)
@@ -118,6 +119,22 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
 
     if (errA) throw errA;
 
+    // Verifica se já existe registro de validação final; se não houver e existir conversa, executa automaticamente
+    let registroValidacao = (mensagens || []).find(m => m.remetente === "validacao_final");
+    let validacaoFinal = null;
+
+    if (registroValidacao) {
+      try {
+        validacaoFinal = JSON.parse(registroValidacao.texto);
+      } catch (e) {}
+    } else if (mensagens && mensagens.length > 0) {
+      try {
+        validacaoFinal = await executarValidacaoInterdisciplinar(form.id);
+      } catch (e) {
+        console.warn("Aviso ao executar validação final sob demanda para o PDF:", e.message);
+      }
+    }
+
     const isMedio = form.segmento && form.segmento.toLowerCase().includes("médio");
     const matrizCompleta = isMedio ? MATRIZ_MEDIO : MATRIZ_FUNDAMENTAL;
 
@@ -128,20 +145,16 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
 
     doc.pipe(res);
 
-    // --- CAPA (LOGO NO TOPO, TEXTO ABAIXO SEM SOBREPOSIÇÃO) ---
+    // --- CAPA ---
     const logoPath = path.join(process.cwd(), "icons", "logo-sesi.png");
     const logoTop = 50;
     const logoWidth = 120;
     const logoX = (doc.page.width - logoWidth) / 2;
 
     if (fs.existsSync(logoPath)) {
-      // Calcula a altura real proporcional da imagem
       const img = doc.openImage(logoPath);
       const logoHeight = (img.height / img.width) * logoWidth;
-
       doc.image(logoPath, logoX, logoTop, { width: logoWidth });
-
-      // Cursor posicionado exatamente abaixo da logo + respiro
       doc.y = logoTop + logoHeight + 20;
     } else {
       doc.fontSize(10).text("[Logo SESI não encontrada]", { align: 'center' });
@@ -165,68 +178,86 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
 
     doc.moveDown(4);
 
-    doc.fontSize(10).fillColor('#555').text('SESI · Nova EJA · Reconhecimento de Saberes · v2.0', { align: 'center' });
+    doc.fontSize(10).fillColor('#555').text('SESI · Nova EJA · Reconhecimento de Saberes · v3.0', { align: 'center' });
     doc.fontSize(8).text('Desenvolvido por Emilliano Gabriel Macêdo - Pedagogo / Supervisor Pedagógico', { align: 'center' });
 
     doc.addPage();
 
-    // --- CONTEÚDO (Fonte 10) ---
-    doc.fillColor('black').fontSize(10).text('Relatório de Reconhecimento', { align: 'center' });
+    // --- PÁGINA 2: PARECER INTERDISCIPLINAR FINAL (REGRA DOS 60% DE DH) ---
+    doc.fillColor('black').fontSize(12).text('Relatório de Reconhecimento de Saberes', { align: 'center' });
     doc.moveDown();
     doc.fontSize(10).text(`Nome: ${aluno.nome_completo}`);
     doc.text(`CPF: ${aluno.cpf}`);
+    doc.text(`Turma: ${form.turma || "Não informada"}`);
     doc.text(`Etapa: ${form.segmento}`);
-    doc.text(`Status: Concluído`);
+    doc.text(`Status: ${form.status === "concluido" ? "Concluído" : "Em andamento"}`);
     doc.moveDown();
 
-    // Habilidades Reconhecidas pela IA
-    const habilidadesMap = new Map();
-    mensagens.forEach(msg => {
-      if (msg.habilidade_id) {
-        try {
-          const hab = JSON.parse(msg.habilidade_id);
-          if (hab && hab.area) {
-            const codigoHab = hab.habilidade || hab.codigo || "Habilidade Identificada";
-            const chave = `${hab.area}-${codigoHab}`;
-            if (!habilidadesMap.has(chave)) {
-              habilidadesMap.set(chave, { area: hab.area, codigo: codigoHab, justificativa: hab.justificativa || "Reconhecida." });
-            }
-          }
-        } catch (e) {}
-      }
-    });
+    doc.fontSize(11).fillColor('#0057b8').text('Validação Interdisciplinar Final (Critério Mínimo: 60% dos DHs):', { underline: true });
+    doc.moveDown(0.5);
+    doc.fillColor('black');
 
-    const habilidades = Array.from(habilidadesMap.values());
-    if (habilidades.length > 0) {
-      doc.fontSize(10).text('Habilidades Reconhecidas pela IA:', { underline: true });
-      doc.moveDown(0.5);
-      habilidades.forEach(h => {
-        doc.fontSize(10).text(`Área: ${h.area} | Habilidade: ${h.codigo}`);
-        doc.fontSize(10).fillColor('#555').text(`Justificativa: ${h.justificativa}`);
-        doc.moveDown(0.5);
-      });
+    if (validacaoFinal) {
+      if (validacaoFinal.resumo_geral) {
+        doc.fontSize(10).text(`Parecer Técnico: ${validacaoFinal.resumo_geral}`);
+        doc.moveDown();
+      }
+
+      const habsValidadas = Array.isArray(validacaoFinal.habilidades_validadas)
+        ? validacaoFinal.habilidades_validadas
+        : [];
+
+      if (habsValidadas.length > 0) {
+        habsValidadas.forEach((h, idx) => {
+          doc.fontSize(10).fillColor('#0057b8').text(
+            `${idx + 1}. Área: ${h.area} | Habilidade: ${h.codigo}${h.descricao_habilidade ? ` – ${h.descricao_habilidade}` : ""}`
+          );
+          doc.fillColor('black').fontSize(9.5);
+          if (h.dhs_atingidos || h.percentual_dh) {
+            const listaDH = Array.isArray(h.dhs_atingidos) ? h.dhs_atingidos.join(", ") : (h.dhs_atingidos || "");
+            doc.text(`• DHs Comprovados: ${listaDH} ${h.percentual_dh ? `(${h.percentual_dh})` : ""}`);
+          }
+          doc.text(`• Quem: ${h.quem || aluno.nome_completo}`);
+          doc.text(`• Onde (Evidência Literal): ${h.onde || "Não especificado"}`);
+          doc.text(`• Por quê (Justificativa Técnica): ${h.porque || "Não especificado"}`);
+          doc.moveDown(0.7);
+        });
+      } else {
+        doc.fontSize(10).fillColor('#555').text(
+          'Nenhuma habilidade atingiu o critério mínimo obrigatório de 60% dos Detalhamentos de Habilidade (DH) com evidência textual explícita nos 8 formulários.'
+        );
+        doc.fillColor('black');
+      }
+    } else {
+      doc.fontSize(10).fillColor('#555').text('Validação final ainda não processada.');
       doc.fillColor('black');
     }
 
     doc.addPage();
 
-    // --- RELATOS POR BLOCO (Fonte 10 e Checkboxes) ---
-    doc.fontSize(10).text('Relatos de Experiência por Bloco:', { underline: true });
+    // --- RELATOS POR FORMULÁRIO (Fonte 10 e Checkboxes) ---
+    doc.fontSize(11).fillColor('#0057b8').text('Relatos de Experiência por Formulário:', { underline: true });
+    doc.fillColor('black');
     doc.moveDown();
 
-    const blocos = {};
-    mensagens.forEach(msg => {
-      if (!blocos[msg.aba]) blocos[msg.aba] = [];
-      blocos[msg.aba].push(msg);
+    const formulariosAgrupados = {};
+    (mensagens || []).forEach(msg => {
+      if (msg.remetente === "validacao_final") return;
+      if (!formulariosAgrupados[msg.aba]) formulariosAgrupados[msg.aba] = [];
+      formulariosAgrupados[msg.aba].push(msg);
     });
 
-    const titulosBlocos = {
-      1: "1. História de Vida", 2: "2. Tempo Livre", 3: "3. Atividades Sociais",
-      4: "4. Experiência Profissional", 5: "5. Linguagens", 6: "6. Matemática",
-      7: "7. Ciências da Natureza", 8: "8. Ciências Humanas"
+    const titulosFormularios = {
+      1: "Formulário 1: História de Vida",
+      2: "Formulário 2: Tempo Livre",
+      3: "Formulário 3: Atividades Sociais",
+      4: "Formulário 4: Experiência Profissional",
+      5: "Formulário 5: Linguagens",
+      6: "Formulário 6: Matemática",
+      7: "Formulário 7: Ciências da Natureza",
+      8: "Formulário 8: Ciências Humanas"
     };
 
-    // Função para extrair competências e habilidades da matriz
     const extrairCompetenciasEHabilidades = (matriz, area) => {
       const matrizNormalizada = matriz.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       const regexArea = new RegExp(`(?:\\[${area}\\]|${area}\\s*\\n)([\\s\\S]*?)(?=\\[|$)`, 'i');
@@ -250,14 +281,14 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
     };
 
     for (let i = 1; i <= 8; i++) {
-      if (blocos[i] && blocos[i].length > 0) {
-        doc.fontSize(10).text(titulosBlocos[i], { underline: true });
+      if (formulariosAgrupados[i] && formulariosAgrupados[i].length > 0) {
+        doc.fontSize(10).fillColor('#0057b8').text(titulosFormularios[i], { underline: true });
+        doc.fillColor('black');
         doc.moveDown(0.5);
 
-        // Relatos
         let ultimaPerguntaIA = "";
-        blocos[i].forEach(msg => {
-          const textoLimpo = msg.texto.replace(/\[MATRIZ:.*?\]|\[FIM_BLOCO\]/g, "").trim();
+        formulariosAgrupados[i].forEach(msg => {
+          const textoLimpo = msg.texto.replace(/\[MATRIZ:.*?\]|\[FIM_FORMULARIO\]|\[FIM_BLOCO\]/g, "").trim();
           if (msg.remetente === 'ia') {
             ultimaPerguntaIA = textoLimpo;
           } else if (msg.remetente === 'aluno' && textoLimpo) {
@@ -271,7 +302,7 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
         });
         doc.moveDown();
 
-        // Checkboxes para blocos 5 a 8
+        // Checkboxes de validação do professor para Formulários 5 a 8
         if (i >= 5) {
           doc.fontSize(10).text('Validação do Professor:', { underline: true });
           doc.moveDown(0.5);
@@ -300,7 +331,6 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
               doc.moveDown(0.5);
             });
           } else {
-            // Fallback: lista diretamente as habilidades da matriz
             const matrizNormalizada = matrizCompleta.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
             const regexArea = new RegExp(`(?:\\[${areaNome}\\]|${areaNome}\\s*\\n)([\\s\\S]*?)(?=\\[|$)`, 'i');
             const match = matrizNormalizada.match(regexArea);

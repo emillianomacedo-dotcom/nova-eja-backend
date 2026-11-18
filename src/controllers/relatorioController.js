@@ -16,18 +16,18 @@ export async function gerarRelatorio(req, res, next) {
     const textoAluno = falasAluno.join("\n\n");
 
     const prompt = `
-Voce e um avaliador pedagogico do SESI. Abaixo estao as respostas de um aluno.
-Sua tarefa e:
-1. Agrupar as respostas em formato de relatorio, usando os titulos oficiais dos blocos.
-2. Identificar quais HABILIDADES ESPECIFICAS da Matriz SESI o aluno demonstrou (ex: "H1 - Identificar formas...", "H4 - Descrever...").
+Você é um avaliador pedagógico do SESI. Abaixo estão as respostas de um aluno.
+Sua tarefa é:
+1. Agrupar as respostas em formato de relatório, usando os títulos oficiais dos Formulários (Formulário 1 a Formulário 8).
+2. Identificar quais HABILIDADES ESPECÍFICAS da Matriz SESI o aluno demonstrou (ex: "H1 - Identificar formas...", "H4 - Descrever..."), exigindo evidência explícita de pelo menos 60% dos Detalhamentos de Habilidade (DH).
 
 RESPOSTAS DO ALUNO:
 ${textoAluno}
 
-INSTRUCOES DO RELATORIO:
-- Organize em topicos: "1. Historia da Minha Vida", etc.
-- No final, crie uma secao "HABILIDADES RECONHECIDAS" listando o nome da habilidade e um trecho da fala que comprova.
-- Seja rigoroso: so marque uma habilidade se houver evidencia clara na fala do aluno.
+INSTRUÇÕES DO RELATÓRIO:
+- Organize em tópicos: "Formulário 1: História da Minha Vida", etc.
+- No final, crie uma seção "HABILIDADES RECONHECIDAS" listando Quem, Onde (Formulário e trecho literal) e Por quê (DHs atingidos).
+- Seja rigoroso: não faça inferências sobre relatos rasos.
 `;
 
     const r = await conversar({ 
