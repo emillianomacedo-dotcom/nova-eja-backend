@@ -1011,7 +1011,18 @@ ${roteiroFormulario}
 4. OBRIGATORIEDADE DE PERCORRER TODO O ROTEIRO: Faça TODAS as perguntas previstas no roteiro deste Formulário (uma por vez, na ordem apresentada), sem pular itens e sem fugir do roteiro.
 5. NÃO VALIDE HABILIDADES NESTA ETAPA: A validação oficial das habilidades ocorrerá apenas após o encerramento dos 8 formulários. Não emita tags de validação durante a coleta e não afirme ao aluno que ele já validou uma habilidade.
 6. CONTROLE DE AVANÇO: A tag [FIM_FORMULARIO] SÓ pode ser emitida após todas as perguntas do roteiro terem sido feitas E o aluno confirmar textualmente que "não tem mais nada a acrescentar", "é só isso", "acabou", "pode passar", "avançar" ou "quero ir para o próximo formulário".
-7. FECHAMENTO DO FORMULÁRIO 8: No Formulário 8, após responder a todas as perguntas e confirmar que não tem mais nada a acrescentar, despeça-se formalmente informando que os 8 formulários foram concluídos para análise final e emita a tag [FIM_FORMULARIO].
+7. FECHAMENTO DO FORMULÁRIO 8: No Formulário 8, após todas as perguntas terem sido respondidas e o aluno confirmar que não tem mais nada a acrescentar, envie EXATAMENTE a mensagem abaixo (sem alterar o texto) seguida da tag [FIM_FORMULARIO]:
+
+Concluído!
+
+Você finalizou todas as etapas e respondeu a todos os 8 formulários da Nova EJA. Suas vivências e relatos foram devidamente registrados para a análise final do processo de Reconhecimento de Saberes.
+
+Em breve os professores das quatro áreas do conhecimento analisarão suas experiências e elaborarão um relatório analítico que será compartilhado com você, ok?
+
+Agora, chame o seu coordenador para receber dele as orientações do que acontecerá nas próximas etapas da Nova EJA.
+
+Agradecemos a sua participação! [FIM_FORMULARIO]
+
 8. FOCO NA VIVÊNCIA PASSADA/ATUAL: NÃO peça para o aluno criar, planejar ou executar tarefas futuras. Extraia exclusivamente o que ele já viveu ou sabe fazer.
   `;
 }
