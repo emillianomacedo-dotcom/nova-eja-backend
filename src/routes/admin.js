@@ -83,7 +83,6 @@ router.get("/alunos/:id/relatorio", async (req, res, next) => {
     const isMedio = form.segmento && form.segmento.toLowerCase().includes("médio");
     const matriz = isMedio ? MATRIZ_MEDIO : MATRIZ_FUNDAMENTAL;
 
-    // Filtra registros internos de câmera para não sobrecarregar o JSON do relatório
     const mensagensFiltradas = (mensagens || []).filter(
       m => m.remetente !== "auditoria_camera" && m.remetente !== "sistema_auditoria"
     );
@@ -139,7 +138,7 @@ router.get("/alunos/:id/auditoria", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 4. Gerar PDF (Capa + Validação Interdisciplinar Final + Relatos por Formulário + Checkboxes)
+// 4. Gerar PDF (Capa + Validação Interdisciplinar + Relatos + Checkboxes + Snapshots de Autenticidade)
 router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -171,7 +170,6 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
 
     if (errA) throw errA;
 
-    // Verifica se já existe registro de validação final; se não houver e existir conversa, executa automaticamente
     const mensagensConversa = (mensagens || []).filter(
       m => m.remetente === "ia" || m.remetente === "aluno"
     );
@@ -361,7 +359,6 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
         });
         doc.moveDown();
 
-        // Checkboxes de validação do professor para Formulários 5 a 8
         if (i >= 5) {
           doc.fontSize(10).text('Validação do Professor:', { underline: true });
           doc.moveDown(0.5);
@@ -415,6 +412,133 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
           doc.moveDown();
         }
       }
+    }
+
+    // --- ÚLTIMA SEÇÃO: REGISTRO DE AUTENTICIDADE (SNAPSHOTS POR FORMULÁRIO) ---
+    const registrosCamera = (mensagens || []).filter(
+      m => m.remetente === "auditoria_camera" || m.remetente === "sistema_auditoria"
+    );
+
+    doc.addPage();
+    doc.fontSize(12).fillColor('#0057b8').text('Registro de Autenticidade e Identificação do Estudante (LGPD)', { underline: true });
+    doc.moveDown(0.4);
+    doc.fillColor('black').fontSize(9.5);
+    doc.text(`Estudante Identificado: ${aluno.nome_completo} | CPF: ${aluno.cpf}`);
+    doc.text(`Turma: ${form.turma || "Não informada"} | Etapa: ${form.segmento}`);
+    doc.moveDown(0.8);
+
+    const fotosValidas = [];
+    let avisoRecusa = null;
+
+    registrosCamera.forEach(reg => {
+      if (reg.remetente === "sistema_auditoria") {
+        avisoRecusa = reg.texto;
+        return;
+      }
+      try {
+        const parsed = JSON.parse(reg.texto);
+        if (parsed && parsed.imagem) {
+          fotosValidas.push({
+            aba: Number(reg.aba) || 1,
+            motivo: parsed.motivo || "inicio_formulario",
+            data_hora: parsed.data_hora || null,
+            imagem: parsed.imagem
+          });
+        }
+      } catch (e) {}
+    });
+
+    if (fotosValidas.length > 0) {
+      doc.fontSize(9).fillColor('#475569').text(
+        'Capturas fotográficas autorizadas pelo estudante a cada início/mudança de formulário para comprovação de autoria:'
+      );
+      doc.moveDown(1);
+
+      const larguraCard = 235;
+      const alturaImagem = 155;
+      const alturaCardTotal = 215;
+      const margemEsquerda = 50;
+      const espacoColunas = 25;
+
+      let coluna = 0;
+      let yLinhaAtual = doc.y;
+
+      fotosValidas.forEach((foto) => {
+        // Quebra de página caso não caiba a próxima linha de cards
+        if (yLinhaAtual + alturaCardTotal > doc.page.height - 60) {
+          doc.addPage();
+          yLinhaAtual = 50;
+          coluna = 0;
+        }
+
+        const xCard = margemEsquerda + coluna * (larguraCard + espacoColunas);
+
+        // Moldura discreta do card
+        doc.rect(xCard, yLinhaAtual, larguraCard, alturaCardTotal)
+          .lineWidth(0.7)
+          .strokeColor('#cbd5e1')
+          .stroke();
+
+        // Converte DataURL Base64 para Buffer JPEG e desenha no PDF
+        try {
+          const base64Limpo = foto.imagem.replace(/^data:image\/\w+;base64,/, "");
+          const imgBuffer = Buffer.from(base64Limpo, "base64");
+          doc.image(imgBuffer, xCard + 10, yLinhaAtual + 8, {
+            fit: [larguraCard - 20, alturaImagem],
+            align: 'center',
+            valign: 'center'
+          });
+        } catch (errImg) {
+          doc.fontSize(8.5).fillColor('#c0392b').text(
+            '[Imagem indisponível]',
+            xCard + 10,
+            yLinhaAtual + 70,
+            { width: larguraCard - 20, align: 'center' }
+          );
+        }
+
+        // Legenda identificando o formulário, aluno e horário
+        const tituloForm = titulosFormularios[foto.aba] || `Formulário ${foto.aba}`;
+        const dataFormatada = foto.data_hora
+          ? new Date(foto.data_hora).toLocaleString('pt-BR', { timeZone: 'America/Recife' })
+          : "Horário não registrado";
+
+        const yTexto = yLinhaAtual + alturaImagem + 14;
+        doc.fontSize(8.5).fillColor('#0057b8').text(
+          tituloForm,
+          xCard + 10,
+          yTexto,
+          { width: larguraCard - 20, ellipsis: true }
+        );
+        doc.fontSize(8).fillColor('black').text(
+          `Aluno: ${aluno.nome_completo}`,
+          xCard + 10,
+          yTexto + 12,
+          { width: larguraCard - 20, ellipsis: true }
+        );
+        doc.fontSize(7.5).fillColor('#555').text(
+          `Registro: ${dataFormatada}`,
+          xCard + 10,
+          yTexto + 23,
+          { width: larguraCard - 20, ellipsis: true }
+        );
+
+        coluna++;
+        if (coluna >= 2) {
+          coluna = 0;
+          yLinhaAtual += alturaCardTotal + 16;
+        }
+      });
+
+      // Atualiza cursor Y ao final da grade
+      doc.y = coluna === 0 ? yLinhaAtual : yLinhaAtual + alturaCardTotal + 16;
+    } else {
+      doc.fontSize(10).fillColor('#555').text(
+        avisoRecusa
+          ? `Registro do sistema: ${avisoRecusa}`
+          : 'Nenhuma captura fotográfica de câmera foi registrada durante esta sessão (câmera não autorizada ou dispositivo sem câmera).'
+      );
+      doc.fillColor('black');
     }
 
     doc.end();
