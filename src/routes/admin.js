@@ -83,7 +83,59 @@ router.get("/alunos/:id/relatorio", async (req, res, next) => {
     const isMedio = form.segmento && form.segmento.toLowerCase().includes("médio");
     const matriz = isMedio ? MATRIZ_MEDIO : MATRIZ_FUNDAMENTAL;
 
-    res.json({ ok: true, mensagens: mensagens || [], formulario: form, matriz: matriz });
+    // Filtra registros internos de câmera para não sobrecarregar o JSON do relatório
+    const mensagensFiltradas = (mensagens || []).filter(
+      m => m.remetente !== "auditoria_camera" && m.remetente !== "sistema_auditoria"
+    );
+
+    res.json({ ok: true, mensagens: mensagensFiltradas, formulario: form, matriz: matriz });
+  } catch (e) { next(e); }
+});
+
+// 3.1 Buscar capturas de autenticidade (câmera autorizada pelo aluno)
+router.get("/alunos/:id/auditoria", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { data: form, error: errF } = await supabase
+      .from("formularios")
+      .select("id")
+      .eq("aluno_id", id)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (errF) throw errF;
+    if (!form) return res.json({ ok: true, capturas: [] });
+
+    const { data: registros, error: errM } = await supabase
+      .from("mensagens_chat")
+      .select("*")
+      .eq("formulario_id", form.id)
+      .in("remetente", ["auditoria_camera", "sistema_auditoria"])
+      .order("id");
+
+    if (errM) throw errM;
+
+    const capturas = (registros || []).map(r => {
+      if (r.remetente === "sistema_auditoria") {
+        return { id: r.id, aba: r.aba, tipo: "aviso", detalhe: r.texto };
+      }
+      try {
+        const parsed = JSON.parse(r.texto);
+        return {
+          id: r.id,
+          aba: r.aba,
+          tipo: "foto",
+          motivo: parsed.motivo,
+          data_hora: parsed.data_hora,
+          imagem: parsed.imagem
+        };
+      } catch (e) {
+        return null;
+      }
+    }).filter(Boolean);
+
+    res.json({ ok: true, capturas });
   } catch (e) { next(e); }
 });
 
@@ -103,7 +155,7 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
     if (errF) throw errF;
     if (!form) return res.status(404).json({ ok: false, mensagem: "Formulário não encontrado" });
 
-    let { data: mensagens, error: errM } = await supabase
+    const { data: mensagens, error: errM } = await supabase
       .from("mensagens_chat")
       .select("*")
       .eq("formulario_id", form.id)
@@ -120,14 +172,17 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
     if (errA) throw errA;
 
     // Verifica se já existe registro de validação final; se não houver e existir conversa, executa automaticamente
-    let registroValidacao = (mensagens || []).find(m => m.remetente === "validacao_final");
+    const mensagensConversa = (mensagens || []).filter(
+      m => m.remetente === "ia" || m.remetente === "aluno"
+    );
+    const registroValidacao = (mensagens || []).find(m => m.remetente === "validacao_final");
     let validacaoFinal = null;
 
     if (registroValidacao) {
       try {
         validacaoFinal = JSON.parse(registroValidacao.texto);
       } catch (e) {}
-    } else if (mensagens && mensagens.length > 0) {
+    } else if (mensagensConversa.length > 0) {
       try {
         validacaoFinal = await executarValidacaoInterdisciplinar(form.id);
       } catch (e) {
@@ -242,7 +297,11 @@ router.get("/alunos/:id/relatorio.pdf", async (req, res, next) => {
 
     const formulariosAgrupados = {};
     (mensagens || []).forEach(msg => {
-      if (msg.remetente === "validacao_final") return;
+      if (
+        msg.remetente === "validacao_final" ||
+        msg.remetente === "auditoria_camera" ||
+        msg.remetente === "sistema_auditoria"
+      ) return;
       if (!formulariosAgrupados[msg.aba]) formulariosAgrupados[msg.aba] = [];
       formulariosAgrupados[msg.aba].push(msg);
     });

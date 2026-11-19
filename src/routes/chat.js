@@ -36,5 +36,29 @@ router.get("/:formulario_id", async (req, res, next) => {
     res.json({ ok: true, mensagens: data });
   } catch (e) { next(e); }
 });
+// Salvar snapshot de autenticidade a cada mudança de formulário (autorizado pelo aluno)
+router.post("/snapshot", async (req, res, next) => {
+  try {
+    const { formulario_id, aba, motivo, imagem_base64 } = req.body;
+    if (!formulario_id || !imagem_base64) {
+      return res.status(400).json({ ok: false, mensagem: "Dados incompletos" });
+    }
 
+    const { error } = await supabase.from("mensagens_chat").insert({
+      formulario_id: formulario_id,
+      remetente: "auditoria_camera",
+      texto: JSON.stringify({
+        motivo: motivo || "mudanca_formulario",
+        data_hora: new Date().toISOString(),
+        imagem: imagem_base64
+      }),
+      aba: aba || 1
+    });
+
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
 export default router;
